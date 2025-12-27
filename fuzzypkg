@@ -41,6 +41,29 @@ column_wrap() {
   echo -e "${footer//^/${pad}}"
 }
 
+# Emulate xq behavior: Info, Dependencies, Required By
+fallback_xq() {
+  local pkg="$1"
+  local info
+
+  info="$(xbps-query -R -S "$pkg" 2>&1)"
+
+  # Emulate 'totop' logic: print specific fields first, then the rest
+  echo "$info" | grep "^short_desc"
+  echo "$info" | grep "^pkgver"
+  # Print the rest, excluding the fields we already printed to avoid duplicates
+  echo "$info" | grep -v -E "^(short_desc|pkgver)"
+
+  xbps-query -R -x "$pkg" | sed 's/^/	/;1s/^/depends:\n/'
+
+  local revdep
+  revdep=$(xbps-query -R -X "$pkg" | sed 's/^/	/')
+  if [ -n "$revdep" ]; then
+    printf "required-by:\n%s\n" "$revdep"
+  fi
+}
+export -f fallback_xq
+
 
 main() {
   trap delay_exit EXIT
@@ -61,6 +84,13 @@ main() {
       break
     fi
   done
+
+  # Check if XQ_BIN is available
+  if command -v "${XQ_BIN}" >/dev/null 2>&1; then
+    PREVIEW_CMD="${XQ_BIN} {2}"
+  else
+    PREVIEW_CMD="bash -c 'fallback_xq {2}'"
+  fi
 
   [ -z "${HIDE_DETAILS}" ] && SHOW_DETAILS="nohidden"
   [ -z "${HIDE_HEADER}" ] && SHOW_HEADER=1
@@ -99,7 +129,7 @@ main() {
         --marker="M" \
         --no-separator \
         --border-label=" Available Packages " \
-        --preview="${XQ_BIN} {2}" \
+        --preview="${PREVIEW_CMD} {2}" \
         --preview-window="down:wrap:${PREVIEW_BORDER:-border-sharp}:${SHOW_DETAILS}" \
         --preview-label=" Package Details " \
         --bind "${PD_KEY}:toggle-preview" \
